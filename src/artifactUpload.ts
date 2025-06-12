@@ -84,7 +84,6 @@ ${timestamp}
 
 _Look for the artifact named "${artifactResult.name}" in the Actions tab._
 
-## Summary
 ${summaryContent}
 
 ${legend}`;
