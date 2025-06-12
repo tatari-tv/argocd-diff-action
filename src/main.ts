@@ -6,6 +6,12 @@ import { ArgoCDServer } from './argocd/ArgoCDServer.js';
 import { type Diff } from './Diff.js';
 import { scrubSecrets } from './lib.js';
 import getActionInput, { ActionInput } from './getActionInput.js';
+import {
+    createDiffArtifact,
+    createTruncatedComment,
+    exceedsCommentLimit,
+    type ArtifactResult,
+} from './artifactUpload.js';
 
 run().catch((e) => {
     console.error(e);
@@ -50,7 +56,7 @@ async function run(): Promise<void> {
     await postDiffComment([...appDiffs, ...appOfAppDiffs], actionInput);
 }
 
-async function postDiffComment(diffs: Diff[], actionInput: ActionInput): Promise<void> {
+export async function postDiffComment(diffs: Diff[], actionInput: ActionInput): Promise<void> {
     const octokit = github.getOctokit(actionInput.githubToken);
     const { owner, repo } = github.context.repo;
     const sha = github.context.payload.pull_request?.head?.sha;
@@ -102,16 +108,59 @@ ${diff}
 ## ArgoCD Diff ${actionInput.argocd.fqdn} for commit [\`${shortCommitSha}\`](${commitLink})
 `;
 
-    const output = scrubSecrets(`${header}
-_Updated at ${new Date().toLocaleString('en-CA', { timeZone: actionInput.timezone })} PT_
-  ${diffOutput.join('\n')}
-
-| Legend | Status |
+    const timestamp = `_Updated at ${new Date().toLocaleString('en-CA', { timeZone: actionInput.timezone })} PT_`;
+    const legend = `| Legend | Status |
 | :---:  | :---   |
 | ✅     | The app is synced in ArgoCD, and diffs you see are solely from this PR. |
 | ⚠️      | The app is out-of-sync in ArgoCD, and the diffs you see include those changes plus any from this PR. |
-| 🛑     | There was an error generating the ArgoCD diffs due to changes in this PR. |
+| 🛑     | There was an error generating the ArgoCD diffs due to changes in this PR. |`;
+
+    const fullOutput = scrubSecrets(`${header}
+${timestamp}
+  ${diffOutput.join('\n')}
+
+${legend}
 `, actionInput.argocd.headers);
+
+    let finalOutput = fullOutput;
+
+    // If the comment is too long, create an artifact and link to it
+    if (exceedsCommentLimit(fullOutput)) {
+        try {
+            const artifactResult = await createDiffArtifact(
+                fullOutput,
+                github.context.issue.number,
+                new Date().toISOString(),
+            );
+
+            // Create truncated summary for comment
+            const truncatedDiffOutput = diffs.map(
+                ({ app, error }) => `
+App: [\`${app.metadata.name}\`](${actionInput.argocd.uri}/applications/${app.metadata.name})
+YAML generation: ${error ? ' Error 🛑' : 'Success 🟢'}
+App sync status: ${app.status.sync.status === 'Synced' ? 'Synced ✅' : 'Out of Sync ⚠️ '}
+---
+`,
+            ).join('\n');
+
+            finalOutput = scrubSecrets(
+                createTruncatedComment(
+                    header,
+                    timestamp,
+                    fullOutput.length,
+                    artifactResult,
+                    truncatedDiffOutput,
+                    legend,
+                ),
+                actionInput.argocd.headers,
+            );
+        }
+        catch (error) {
+            core.warning(`Failed to create artifact for large diff: ${error instanceof Error ? error.message : String(error)}`);
+            // Fall back to using the original comment (it will be truncated by GitHub)
+            finalOutput = fullOutput;
+        }
+    }
 
     const commentsResponse = await octokit.rest.issues.listComments({
         issue_number: github.context.issue.number,
@@ -129,7 +178,7 @@ _Updated at ${new Date().toLocaleString('en-CA', { timeZone: actionInput.timezon
             owner,
             repo,
             comment_id: existingComment.id,
-            body: output,
+            body: finalOutput,
         });
     // Only post a new comment when there are changes
     }
@@ -138,7 +187,7 @@ _Updated at ${new Date().toLocaleString('en-CA', { timeZone: actionInput.timezon
             issue_number: github.context.issue.number,
             owner,
             repo,
-            body: output,
+            body: finalOutput,
         });
     }
 }
