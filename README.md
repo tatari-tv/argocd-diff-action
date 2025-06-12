@@ -86,6 +86,7 @@ jobs:
    `--revision`.
     - Note that this won't include any other changes to the App of App (e.g., Helm value changes).
 6. Posts the diff output as a comment on the PR (updating the same comment if it already exists).
+   - If the diff exceeds GitHub's 65,536 character comment limit, the full diff is uploaded as a downloadable GitHub Actions artifact, and a truncated summary comment is posted with a link to download the complete diff.
 
 ## Releases & Publishing
 
