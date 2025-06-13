@@ -136,9 +136,10 @@ ${legend}
             // Create truncated summary for comment
             const truncatedDiffOutput = diffs.map(
                 ({ app, error }) => `
-App: [\`${app.metadata.name}\`](${actionInput.argocd.uri}/applications/${app.metadata.name})
-YAML generation: ${error ? ' Error 🛑' : 'Success 🟢'}
-App sync status: ${app.status.sync.status === 'Synced' ? 'Synced ✅' : 'Out of Sync ⚠️ '}
+**App:** [\`${app.metadata.name}\`](${actionInput.argocd.uri}/applications/${app.metadata.name})  
+**YAML generation:** ${error ? ' Error 🛑' : 'Success 🟢'}  
+**App sync status:** ${app.status.sync.status === 'Synced' ? 'Synced ✅' : 'Out of Sync ⚠️ '}
+
 ---
 `,
             ).join('\n');
